@@ -1,0 +1,362 @@
+### A Pluto.jl notebook ###
+# v0.20.21
+
+using Markdown
+using InteractiveUtils
+
+# ╔═╡ d7e8b246-fbbd-4dc9-b304-8b9a97b5f876
+using LinearAlgebra
+
+# ╔═╡ cb6c17de-757c-4dac-ad5a-236cfa7dfa9e
+using ForwardDiff
+
+# ╔═╡ f17103ea-06bf-11f1-a2b0-79e68ed152eb
+md"""# Project_03 - Multibody Dynamic modeling
+
+![Sliding compound pendulum with a support block connected to a spring and rotating compound pendulum](https://raw.githubusercontent.com/cooperrc/me5180-project_02/refs/heads/main/spring_compound-2_bodies.png)
+
+In this project, a rigid bar is connected to a sliding block along a
+horizontal tracks. The sliding block is connected to a spring that stretches and compresses. The rigid bar $L = 0.4~m$ acts as a compound pendulum.  
+
+1. $x_1-y_1-$ describes block 1 position and orientation, $\theta_1$
+2. $x_2-y_2-$ describes the rigid bar position and orientation, $\theta_2$
+
+The applied forces are, 
+
+1. Spring attached to block 1, $F = -k x_1$ where $k = 10~N/m$
+2. gravity acting on block 1 and the rigid bar, $F_1 = -m_1g\hat{j}$ and $F_2 = -m_2 g\hat{j}$ where $m_1 = 0.1~kg$ and $m_2 = 0.3~kg$
+ 
+In this project, you need to 
+
+1. determine constraint equations $C(\mathbf{q},~t)$
+2. Create an augmented solution method for the dynamic motion of these two moving parts
+3. visualize the motion of the system as the two parts complete at least one oscillation
+4. calculate and show (graph or vectors) the constraint forces acting on the 2-body system
+"""
+
+# ╔═╡ 48b9c52b-d769-4a6b-9363-bca4e491ab1c
+# Parameters
+m1 = 0.1
+
+# ╔═╡ 03826e64-366f-4626-ba4a-7bb996089a57
+m2 = 0.3
+
+# ╔═╡ f10eb650-c59a-47d9-b6e0-c70cf9d8656f
+L = 0.4
+
+# ╔═╡ 28f72d74-58a7-4641-bf5d-38d750ddb99a
+k = 10.0
+
+# ╔═╡ 4384fea2-3606-4f6a-9a2c-04e4e204dbf5
+g = 9.81
+
+# ╔═╡ 7bb6f5f0-156e-48ed-94ee-31f1416d9ca0
+I1 = 1e-6
+
+# ╔═╡ d48a353c-472e-4c75-abd6-12b76eb58d7d
+I2 = (1/12) * m2 * L^2
+
+# ╔═╡ 6dd84497-798f-4d8a-a0b6-dc5d2e49bb68
+# Mass matrix
+M = Diagonal([m1, m1, I1, m2, m2, I2])
+
+# ╔═╡ c50772d3-765c-4e4e-b836-2016fb6f478c
+# q = [x1, y1, θ1, x2, y2, θ2]
+
+function C(q)
+    x1, y1, θ1, x2, y2, θ2 = q
+
+    return [
+        y1,                                      # block stays on horizontal track
+        θ1,                                      # block does not rotate
+        x2 - x1 - (L/2)*cos(θ2),                 # bar center x constraint
+        y2 - y1 - (L/2)*sin(θ2)                  # bar center y constraint
+    ]
+end
+
+# ╔═╡ cd27228b-78c8-4c6a-ad6b-2504a95572d5
+function Cq(q)
+    ForwardDiff.jacobian(C, q)
+end
+
+# ╔═╡ 1350caf9-9c2e-4f5e-a408-448912fa2804
+function Q(q)
+    x1, y1, θ1, x2, y2, θ2 = q
+
+    return [
+        -k*x1,       # spring force on block
+        -m1*g,       # gravity on block
+        0.0,         # no moment on block
+        0.0,         # no horizontal force on bar
+        -m2*g,       # gravity on bar
+        0.0          # no moment on bar
+    ]
+end
+
+# ╔═╡ 8ee6af47-cdb6-43c2-ad2c-5b9c34c185a1
+function gamma(q, qdot)
+    J(q) = Cq(q) * qdot
+    return -ForwardDiff.jacobian(J, q) * qdot
+end
+
+# ╔═╡ 1a3391a0-8149-4516-a88c-59ac433e2791
+function augmented_solution(q, qdot)
+    A = [
+        M        Cq(q)'
+        Cq(q)   zeros(4,4)
+    ]
+
+    b = [
+        Q(q)
+        gamma(q, qdot)
+    ]
+
+    solution = A \ b
+
+    qddot = solution[1:6]
+    λ = solution[7:end]
+
+    return qddot, λ
+end
+
+# ╔═╡ 5b6a8f23-c2cb-4f11-828c-ba44c9be6d14
+θ2 = π/4
+
+# ╔═╡ e0095370-a83b-4721-8433-6ca737f54797
+x1 = 0.05
+
+# ╔═╡ 1679a34b-ac0b-424f-9f39-195ab089f7f8
+y1 = 0.0
+
+# ╔═╡ 36d57c71-a33c-446c-ab02-abee8182c390
+θ1 = 0.0
+
+# ╔═╡ 617ad633-e408-4c13-aca2-afe3074da4ff
+x2 = x1 + (L/2)*cos(θ2)
+
+# ╔═╡ f5451fc9-d52c-4c11-8b80-a8114e9e9478
+y2 = y1 + (L/2)*sin(θ2)
+
+# ╔═╡ ee93ca5c-d02e-45d3-9392-034c9d721e34
+q = [x1, y1, θ1, x2, y2, θ2]
+
+# ╔═╡ b0d30a98-6a63-4ba6-850b-367d96369bc3
+qdot = zeros(6)
+
+# ╔═╡ 58f4090c-02f2-476e-aa64-3c38b834a5fb
+qddot, λ = augmented_solution(q, qdot)
+
+# ╔═╡ cf4a4180-5fd4-4ec1-9cad-f9d31810ab2d
+qddot
+
+# ╔═╡ 00000000-0000-0000-0000-000000000001
+PLUTO_PROJECT_TOML_CONTENTS = """
+[deps]
+ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+
+[compat]
+ForwardDiff = "~1.3.1"
+"""
+
+# ╔═╡ 00000000-0000-0000-0000-000000000002
+PLUTO_MANIFEST_TOML_CONTENTS = """
+# This file is machine-generated - editing it directly is not advised
+
+julia_version = "1.12.4"
+manifest_format = "2.0"
+project_hash = "7e9cf561f5fd2cd088edf202fbf0f95bea82efda"
+
+[[deps.Artifacts]]
+uuid = "56f22d72-fd6d-98f1-02f0-08ddc0907c33"
+version = "1.11.0"
+
+[[deps.CommonSubexpressions]]
+deps = ["MacroTools"]
+git-tree-sha1 = "cda2cfaebb4be89c9084adaca7dd7333369715c5"
+uuid = "bbf7d656-a473-5ed7-a52c-81e309532950"
+version = "0.3.1"
+
+[[deps.CompilerSupportLibraries_jll]]
+deps = ["Artifacts", "Libdl"]
+uuid = "e66e0078-7015-5450-92f7-15fbd957f2ae"
+version = "1.3.0+1"
+
+[[deps.Dates]]
+deps = ["Printf"]
+uuid = "ade2ca70-3891-5945-98fb-dc099432e06a"
+version = "1.11.0"
+
+[[deps.DiffResults]]
+deps = ["StaticArraysCore"]
+git-tree-sha1 = "782dd5f4561f5d267313f23853baaaa4c52ea621"
+uuid = "163ba53b-c6d8-5494-b064-1a9d43ac40c5"
+version = "1.1.0"
+
+[[deps.DiffRules]]
+deps = ["IrrationalConstants", "LogExpFunctions", "NaNMath", "Random", "SpecialFunctions"]
+git-tree-sha1 = "23163d55f885173722d1e4cf0f6110cdbaf7e272"
+uuid = "b552c78f-8df3-52c6-915a-8e097449b14b"
+version = "1.15.1"
+
+[[deps.DocStringExtensions]]
+git-tree-sha1 = "7442a5dfe1ebb773c29cc2962a8980f47221d76c"
+uuid = "ffbed154-4ef7-542d-bbb7-c09d3a79fcae"
+version = "0.9.5"
+
+[[deps.ForwardDiff]]
+deps = ["CommonSubexpressions", "DiffResults", "DiffRules", "LinearAlgebra", "LogExpFunctions", "NaNMath", "Preferences", "Printf", "Random", "SpecialFunctions"]
+git-tree-sha1 = "b2977f86ed76484de6f29d5b36f2fa686f085487"
+uuid = "f6369f11-7733-5829-9624-2563aa707210"
+version = "1.3.1"
+
+    [deps.ForwardDiff.extensions]
+    ForwardDiffStaticArraysExt = "StaticArrays"
+
+    [deps.ForwardDiff.weakdeps]
+    StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+
+[[deps.IrrationalConstants]]
+git-tree-sha1 = "b2d91fe939cae05960e760110b328288867b5758"
+uuid = "92d709cd-6900-40b7-9082-c6be49f344b6"
+version = "0.2.6"
+
+[[deps.JLLWrappers]]
+deps = ["Artifacts", "Preferences"]
+git-tree-sha1 = "0533e564aae234aff59ab625543145446d8b6ec2"
+uuid = "692b3bcd-3c85-4b1f-b108-f13ce0eb3210"
+version = "1.7.1"
+
+[[deps.Libdl]]
+uuid = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
+version = "1.11.0"
+
+[[deps.LinearAlgebra]]
+deps = ["Libdl", "OpenBLAS_jll", "libblastrampoline_jll"]
+uuid = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+version = "1.12.0"
+
+[[deps.LogExpFunctions]]
+deps = ["DocStringExtensions", "IrrationalConstants", "LinearAlgebra"]
+git-tree-sha1 = "13ca9e2586b89836fd20cccf56e57e2b9ae7f38f"
+uuid = "2ab3a3ac-af41-5b50-aa03-7779005ae688"
+version = "0.3.29"
+
+    [deps.LogExpFunctions.extensions]
+    LogExpFunctionsChainRulesCoreExt = "ChainRulesCore"
+    LogExpFunctionsChangesOfVariablesExt = "ChangesOfVariables"
+    LogExpFunctionsInverseFunctionsExt = "InverseFunctions"
+
+    [deps.LogExpFunctions.weakdeps]
+    ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
+    ChangesOfVariables = "9e997f8a-9a97-42d5-a9f1-ce6bfc15e2c0"
+    InverseFunctions = "3587e190-3f89-42d0-90ee-14403ec27112"
+
+[[deps.MacroTools]]
+git-tree-sha1 = "1e0228a030642014fe5cfe68c2c0a818f9e3f522"
+uuid = "1914dd2f-81c6-5fcd-8719-6d5c9610ff09"
+version = "0.5.16"
+
+[[deps.NaNMath]]
+deps = ["OpenLibm_jll"]
+git-tree-sha1 = "9b8215b1ee9e78a293f99797cd31375471b2bcae"
+uuid = "77ba4419-2d1f-58cd-9bb1-8ffee604a2e3"
+version = "1.1.3"
+
+[[deps.OpenBLAS_jll]]
+deps = ["Artifacts", "CompilerSupportLibraries_jll", "Libdl"]
+uuid = "4536629a-c528-5b80-bd46-f80d51c5b363"
+version = "0.3.29+0"
+
+[[deps.OpenLibm_jll]]
+deps = ["Artifacts", "Libdl"]
+uuid = "05823500-19ac-5b8b-9628-191a04bc5112"
+version = "0.8.7+0"
+
+[[deps.OpenSpecFun_jll]]
+deps = ["Artifacts", "CompilerSupportLibraries_jll", "JLLWrappers", "Libdl"]
+git-tree-sha1 = "1346c9208249809840c91b26703912dff463d335"
+uuid = "efe28fd5-8261-553b-a9e1-b2916fc3738e"
+version = "0.5.6+0"
+
+[[deps.Preferences]]
+deps = ["TOML"]
+git-tree-sha1 = "522f093a29b31a93e34eaea17ba055d850edea28"
+uuid = "21216c6a-2e73-6563-6e65-726566657250"
+version = "1.5.1"
+
+[[deps.Printf]]
+deps = ["Unicode"]
+uuid = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+version = "1.11.0"
+
+[[deps.Random]]
+deps = ["SHA"]
+uuid = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+version = "1.11.0"
+
+[[deps.SHA]]
+uuid = "ea8e919c-243c-51af-8825-aaa63cd721ce"
+version = "0.7.0"
+
+[[deps.SpecialFunctions]]
+deps = ["IrrationalConstants", "LogExpFunctions", "OpenLibm_jll", "OpenSpecFun_jll"]
+git-tree-sha1 = "f2685b435df2613e25fc10ad8c26dddb8640f547"
+uuid = "276daf66-3868-5448-9aa4-cd146d93841b"
+version = "2.6.1"
+
+    [deps.SpecialFunctions.extensions]
+    SpecialFunctionsChainRulesCoreExt = "ChainRulesCore"
+
+    [deps.SpecialFunctions.weakdeps]
+    ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
+
+[[deps.StaticArraysCore]]
+git-tree-sha1 = "6ab403037779dae8c514bad259f32a447262455a"
+uuid = "1e83bf80-4336-4d27-bf5d-d5a4f845583c"
+version = "1.4.4"
+
+[[deps.TOML]]
+deps = ["Dates"]
+uuid = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
+version = "1.0.3"
+
+[[deps.Unicode]]
+uuid = "4ec0a83e-493e-50e2-b9ac-8f72acf5a8f5"
+version = "1.11.0"
+
+[[deps.libblastrampoline_jll]]
+deps = ["Artifacts", "Libdl"]
+uuid = "8e850b90-86db-534c-a0d3-1478176c7d93"
+version = "5.15.0+0"
+"""
+
+# ╔═╡ Cell order:
+# ╟─f17103ea-06bf-11f1-a2b0-79e68ed152eb
+# ╠═d7e8b246-fbbd-4dc9-b304-8b9a97b5f876
+# ╠═cb6c17de-757c-4dac-ad5a-236cfa7dfa9e
+# ╠═48b9c52b-d769-4a6b-9363-bca4e491ab1c
+# ╠═03826e64-366f-4626-ba4a-7bb996089a57
+# ╠═f10eb650-c59a-47d9-b6e0-c70cf9d8656f
+# ╠═28f72d74-58a7-4641-bf5d-38d750ddb99a
+# ╠═4384fea2-3606-4f6a-9a2c-04e4e204dbf5
+# ╠═7bb6f5f0-156e-48ed-94ee-31f1416d9ca0
+# ╠═d48a353c-472e-4c75-abd6-12b76eb58d7d
+# ╠═6dd84497-798f-4d8a-a0b6-dc5d2e49bb68
+# ╠═c50772d3-765c-4e4e-b836-2016fb6f478c
+# ╠═cd27228b-78c8-4c6a-ad6b-2504a95572d5
+# ╠═1350caf9-9c2e-4f5e-a408-448912fa2804
+# ╠═8ee6af47-cdb6-43c2-ad2c-5b9c34c185a1
+# ╠═1a3391a0-8149-4516-a88c-59ac433e2791
+# ╠═5b6a8f23-c2cb-4f11-828c-ba44c9be6d14
+# ╠═e0095370-a83b-4721-8433-6ca737f54797
+# ╠═1679a34b-ac0b-424f-9f39-195ab089f7f8
+# ╠═36d57c71-a33c-446c-ab02-abee8182c390
+# ╠═617ad633-e408-4c13-aca2-afe3074da4ff
+# ╠═f5451fc9-d52c-4c11-8b80-a8114e9e9478
+# ╠═ee93ca5c-d02e-45d3-9392-034c9d721e34
+# ╠═b0d30a98-6a63-4ba6-850b-367d96369bc3
+# ╠═58f4090c-02f2-476e-aa64-3c38b834a5fb
+# ╠═cf4a4180-5fd4-4ec1-9cad-f9d31810ab2d
+# ╟─00000000-0000-0000-0000-000000000001
+# ╟─00000000-0000-0000-0000-000000000002
