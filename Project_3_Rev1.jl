@@ -1,5 +1,5 @@
 ### A Pluto.jl notebook ###
-# v0.20.21
+# v0.20.22
 
 using Markdown
 using InteractiveUtils
@@ -384,6 +384,139 @@ qddot, λ = augmented_solution(q, qdot)
 # ╔═╡ cf4a4180-5fd4-4ec1-9cad-f9d31810ab2d
 qddot
 
+# ╔═╡ f31794b4-fd4b-4784-a4c1-f27a10987b18
+# Baumgarte Parameters & Stabilized Solver
+begin
+	# Based on notes: alpha = 1/dt, beta = sqrt(2)/dt
+	dt_approx = 0.01 
+	α = 1/dt_approx
+	β = sqrt(2)/dt_approx
+
+	function stabilized_augmented_solver(q_vec, qdot_vec)
+		# 1. Get standard components from your current code
+		current_C  = C(q_vec)
+		current_Cq = Cq(q_vec)
+		current_γ  = gamma(q_vec, qdot_vec)
+		current_Q  = Q(q_vec)
+		
+		# 2. Baumgarte Correction: Qd = γ - 2α(Cq*qdot) - β²(C)
+		# This is the "Right Hand Side" for the acceleration constraints
+		C_dot = current_Cq * qdot_vec
+		γ_stab = current_γ - 2α*C_dot - β^2 * current_C
+		
+		# 3. Form the Augmented Matrix: [M Cq'; Cq 0]
+		A_aug = [
+			M            current_Cq'
+			current_Cq   zeros(4, 4)
+		]
+		
+		# 4. Form the RHS vector: [Q; γ_stab]
+		b_aug = [
+			current_Q
+			γ_stab
+		]
+		
+		# 5. Solve for [q_ddot; λ]
+		sol_vars = A_aug \ b_aug
+		
+		return sol_vars[1:6], sol_vars[7:10]
+	end
+end
+
+# ╔═╡ 964c61f6-6ae0-498d-9270-c6ebed31f9c6
+# Dynamic Simulation
+begin
+	# Define the system derivative (State-Space)
+	function system_ode!(du, u, p, t)
+		q_curr = u[1:6]
+		qdot_curr = u[7:12]
+		
+		# Compute stabilized accelerations
+		q_ddot, λ_vals = stabilized_augmented_solver(q_curr, qdot_curr)
+		
+		du[1:6]  = qdot_curr  # Velocity
+		du[7:12] = q_ddot     # Acceleration
+	end
+
+	# Initial conditions (defined earlier in your code)
+	u0 = vcat(q, qdot) 
+	t_span = (0.0, 10.0) # Long enough for several oscillations
+
+	# Solve the ODE
+	prob = ODEProblem(system_ode!, u0, t_span)
+	sol = solve(prob, Rodas5(), reltol=1e-6, abstol=1e-6)
+end
+
+# ╔═╡ 85867fc5-38f9-4115-ad2a-146f73f0efed
+# Part 4: Constraint Forces Plot
+begin
+	# Re-calculate λ for every point in the solution
+	λ_history = [stabilized_augmented_solver(u[1:6], u[7:12])[2] for u in sol.u]
+	
+	f_y1 = [λ[1] for λ in λ_history] # Vertical force on block
+	f_px = [λ[3] for λ in λ_history] # Pin force X
+	f_py = [λ[4] for λ in λ_history] # Pin force Y
+	
+	plot(sol.t, [f_y1 f_px f_py], 
+		title="Constraint Forces over Time",
+		label=["Track Force (N)" "Pin Force X (N)" "Pin Force Y (N)"],
+		xlabel="Time (s)", ylabel="Force (N)", lw=1.5)
+end
+
+# ╔═╡ 70146618-5e58-41f1-ab4c-25f84a00ad3a
+# Upgraded Visualization with Realistic Spring and Bar
+begin
+	# Function to generate zigzag spring coordinates
+	function get_spring_coords(x_end, y_end; coils=10, width=0.05)
+		# Line from origin (0,0) to (x_end, y_end)
+		xs = range(0, x_end, length=coils*2 + 2)
+		ys = zeros(length(xs))
+		for i in 2:length(xs)-1
+			ys[i] = y_end + (i % 2 == 0 ? width : -width)
+		end
+		return xs, ys
+	end
+
+	anim_upgraded = @animate for i in 1:2:length(sol.t)
+		# Extract state
+		u_i = sol.u[i]
+		x1_i, y1_i, _, x2_i, y2_i, θ2_i = u_i
+		
+		# Define Bar geometry
+		x_pin = x2_i - (L/2)*cos(θ2_i)
+		y_pin = y2_i - (L/2)*sin(θ2_i)
+		x_tip = x2_i + (L/2)*cos(θ2_i)
+		y_tip = y2_i + (L/2)*sin(θ2_i)
+		
+		# Define Spring path
+		sx, sy = get_spring_coords(x1_i, y1_i)
+
+		# Plotting
+		plot(aspect_ratio=:equal, xlims=(-0.2, 1.2), ylims=(-0.6, 0.4), 
+			 title="Multibody Dynamics", grid=false)
+		
+		# Draw the track
+		hline!([-0.05], color=:gray, alpha=0.5, label="")
+		
+		# Draw the actual Spring (zigzag)
+		plot!(sx, sy, color=:red, lw=1.5, label="Spring (k=$k N/m)")
+		
+		# Draw the Block (as a physical body)
+		scatter!([x1_i], [y1_i], markershape=:rect, markersize=15, 
+			     markercolor=:blue, label="Block ($m1 kg)")
+		
+		# Draw the Bar (thick compound bar)
+		plot!([x_pin, x_tip], [y_pin, y_tip], lw=8, color=:black, 
+			  linealpha=0.8, label="Compound Bar ($m2 kg)")
+		
+		# Add markers for the Pin and the Center of Mass
+		scatter!([x_pin], [y_pin], markersize=5, markercolor=:white, label="Pin Joint")
+		scatter!([x2_i], [y2_i], markersize=3, markercolor=:yellow, label="Bar COM")
+	end
+	
+	gif(anim_upgraded, "realistic_pendulum.gif", fps=30)
+end
+
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
@@ -407,7 +540,7 @@ Symbolics = "~7.17.1"
 PLUTO_MANIFEST_TOML_CONTENTS = """
 # This file is machine-generated - editing it directly is not advised
 
-julia_version = "1.12.5"
+julia_version = "1.12.4"
 manifest_format = "2.0"
 project_hash = "4949eba4c7b39da7aa9388477921ee0bd3cb567e"
 
@@ -3465,5 +3598,9 @@ version = "1.13.0+0"
 # ╠═b0d30a98-6a63-4ba6-850b-367d96369bc3
 # ╠═58f4090c-02f2-476e-aa64-3c38b834a5fb
 # ╠═cf4a4180-5fd4-4ec1-9cad-f9d31810ab2d
+# ╠═f31794b4-fd4b-4784-a4c1-f27a10987b18
+# ╠═964c61f6-6ae0-498d-9270-c6ebed31f9c6
+# ╠═85867fc5-38f9-4115-ad2a-146f73f0efed
+# ╠═70146618-5e58-41f1-ab4c-25f84a00ad3a
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
